@@ -1,7 +1,9 @@
 import yfinance as yf
 from datetime import datetime
+from decimal import Decimal
 import boto3
 import json
+import uuid
 
 # DynamoDB setup
 dynamodb = boto3.resource('dynamodb')
@@ -18,11 +20,12 @@ def get_current_day_data(symbol):
     if today_str in data.index:
         current_day_data = data.loc[today_str]
         return {
+            'id': f"{symbol}_{today_str}",  # Create a unique id using symbol and date
             'symbol': symbol,
-            'open': current_day_data['Open'],
-            'high': current_day_data['High'],
-            'low': current_day_data['Low'],
-            'close': current_day_data['Close']
+            'open': Decimal(str(current_day_data['Open'])),
+            'high': Decimal(str(current_day_data['High'])),
+            'low': Decimal(str(current_day_data['Low'])),
+            'close': Decimal(str(current_day_data['Close']))
         }
     else:
         return {
@@ -31,20 +34,20 @@ def get_current_day_data(symbol):
         }
 
 def camarilla_pivot_points(high, low, close):
-    pivot_point = (high + low + close) / 3
+    pivot_point = (high + low + close) / Decimal('3')
 
-    r4 = (high - low) * 1.1 / 2 + close
-    r3 = (high - low) * 1.1 / 4 + close
-    r2 = (high - low) * 1.1 / 6 + close
-    r1 = (high - low) * 1.1 / 12 + close
+    r4 = (high - low) * Decimal('1.1') / Decimal('2') + close
+    r3 = (high - low) * Decimal('1.1') / Decimal('4') + close
+    r2 = (high - low) * Decimal('1.1') / Decimal('6') + close
+    r1 = (high - low) * Decimal('1.1') / Decimal('12') + close
 
-    s1 = close - (high - low) * 1.1 / 12
-    s2 = close - (high - low) * 1.1 / 6
-    s3 = close - (high - low) * 1.1 / 4
-    s4 = close - (high - low) * 1.1 / 2
+    s1 = close - (high - low) * Decimal('1.1') / Decimal('12')
+    s2 = close - (high - low) * Decimal('1.1') / Decimal('6')
+    s3 = close - (high - low) * Decimal('1.1') / Decimal('4')
+    s4 = close - (high - low) * Decimal('1.1') / Decimal('2')
 
-    breakout_target = close + (high - low) * 1.1
-    breakdown_target = close - (high - low) * 1.1
+    breakout_target = close + (high - low) * Decimal('1.1')
+    breakdown_target = close - (high - low) * Decimal('1.1')
 
     return {
         "breakout_target": breakout_target,
@@ -60,6 +63,21 @@ def camarilla_pivot_points(high, low, close):
         "breakdown_target": breakdown_target
     }
 
+def delete_all_items():
+    scan = table.scan()
+    with table.batch_writer() as batch:
+        for each in scan['Items']:
+            batch.delete_item(
+                Key={
+                    'id': each['id']
+                }
+            )
+
+def decimal_default(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError
+
 tickers = [
     'ES=F', 'NQ=F', 'RTY=F', 'NKD=F',
     '6A=F', '6B=F', '6C=F', '6E=F', '6J=F', '6S=F', 'E7=F', '6M=F', '6N=F',
@@ -72,6 +90,9 @@ tickers = [
 ]
 
 def lambda_handler(event, context):
+    # Delete all existing items
+    delete_all_items()
+    
     results = []
 
     for ticker in tickers:
@@ -88,5 +109,5 @@ def lambda_handler(event, context):
 
     return {
         'statusCode': 200,
-        'body': json.dumps(results)
+        'body': json.dumps(results, default=decimal_default)
     }
